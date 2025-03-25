@@ -90,32 +90,38 @@ app.post("/api/paypal/capture-order", async (req, res) => {
 });
 
 // Function to generate the license key (replace with KeyAuth API or another service)
+// Function to generate license key (replace with KeyAuth API or another service)
 async function generateLicenseKey(userID, hwid) {
     try {
         const keyAuthURL = "https://keyauth.win/api/seller/";
         const params = {
             sellerkey: process.env.KEYAUTH_SELLER_KEY, // Make sure this is set in your environment variables
             type: "add",
-            expiry: "1",  // Set expiry for the license
+            expiry: "10",  // Set expiry for the license
             mask: "******-******-******-******-******-******", // Mask for the license key
             level: 1,  // Level of the license
             amount: 1,  // Amount of licenses to generate (1 for now)
             format: "text"  // Set the response format to text
         };
 
+        console.log("Generating license key with params:", params); // Log the parameters
+
         const response = await axios.get(keyAuthURL, { params });
+
+        console.log("KeyAuth API Response:", response.data); // Log the response from KeyAuth API
 
         if (response.data && response.data.license) {
             console.log("License Key Generated:", response.data.license); // Log the generated license
             return response.data.license;  // License key returned from KeyAuth API
         } else {
-            throw new Error("Failed to generate license key.");
+            throw new Error("Failed to generate license key. Response from KeyAuth: " + JSON.stringify(response.data));
         }
     } catch (error) {
         console.error("Error generating license key:", error.response?.data || error.message);
         throw new Error("Failed to generate license key.");
     }
 }
+
 
 
 // Start the server
