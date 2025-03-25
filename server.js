@@ -19,6 +19,7 @@ app.get("/", (req, res) => {
 // Function to get PayPal access token
 async function getPayPalAccessToken() {
     try {
+        console.log("Requesting PayPal access token...");
         const auth = Buffer.from(`${PAYPAL_CLIENT_ID}:${PAYPAL_SECRET}`).toString("base64");
         const response = await axios.post(`${PAYPAL_API}/v1/oauth2/token`, "grant_type=client_credentials", {
             headers: { 
@@ -26,6 +27,7 @@ async function getPayPalAccessToken() {
                 "Content-Type": "application/x-www-form-urlencoded" 
             },
         });
+        console.log("Access token received:", response.data.access_token);
         return response.data.access_token;
     } catch (error) {
         console.error("Error getting PayPal access token:", error.response?.data || error.message);
@@ -34,14 +36,17 @@ async function getPayPalAccessToken() {
 }
 
 // Capture PayPal Order and generate a license key
-// Create PayPal Order
-// Capture PayPal Order and generate a license key
 app.post("/api/paypal/capture-order", async (req, res) => {
     try {
         const { orderID, userID, hwid } = req.body;
+        console.log("Received order ID:", orderID);
+        console.log("Received user ID:", userID);
+        console.log("Received HWID:", hwid);
+
         const accessToken = await getPayPalAccessToken();
 
         // Check the order status before capturing it
+        console.log(`Checking status for order ID: ${orderID}...`);
         const orderStatus = await axios.get(
             `${PAYPAL_API}/v2/checkout/orders/${orderID}`,
             {
@@ -51,15 +56,16 @@ app.post("/api/paypal/capture-order", async (req, res) => {
                 }
             }
         );
-        
-        console.log("Order Status: ", orderStatus.data); // Log the order status for debugging
+        console.log("Order Status:", orderStatus.data); // Log the order status for debugging
 
         // If the order is already captured, return a specific message
         if (orderStatus.data.status === "COMPLETED") {
+            console.log("Order already captured. No further action required.");
             return res.status(400).json({ error: "Order already captured." });
         }
 
         // If the order has not been captured, proceed with capturing it
+        console.log(`Capturing order ID: ${orderID}...`);
         const captureResponse = await axios.post(
             `${PAYPAL_API}/v2/checkout/orders/${orderID}/capture`,
             {},
@@ -70,12 +76,14 @@ app.post("/api/paypal/capture-order", async (req, res) => {
                 }
             }
         );
-
-        console.log("Capture Response: ", captureResponse.data); // Log the capture response
+        console.log("Capture Response:", captureResponse.data); // Log the capture response
 
         // Generate the license key
+        console.log("Generating license key...");
         const licenseKey = await generateLicenseKey(userID, hwid);
 
+        // Return capture data and the license key
+        console.log("License key generated:", licenseKey);
         res.json({ captureData: captureResponse.data, licenseKey });
     } catch (error) {
         console.error("Error capturing PayPal order:", error.response?.data || error.message);
@@ -83,14 +91,13 @@ app.post("/api/paypal/capture-order", async (req, res) => {
     }
 });
 
-
 // Function to generate license key (use KeyAuth API or other service)
 async function generateLicenseKey(userID, hwid) {
     try {
-        // Replace this URL with the actual KeyAuth API or another license generation service
+        console.log("Requesting license key generation...");
         const keyAuthURL = "https://keyauth.win/api/seller/";
         const params = {
-            sellerkey: process.env.KEYAUTH_SELLER_KEY, // Make sure this is set in your environment variables
+            sellerkey: process.env.KEYAUTH_SELLER_KEY, // Ensure this is set in your environment variables
             type: "add",
             expiry: "1",  // Set expiry for the license
             mask: "******-******-******-******-******-******", // Mask for the license key
@@ -100,8 +107,10 @@ async function generateLicenseKey(userID, hwid) {
         };
 
         const response = await axios.get(keyAuthURL, { params });
+        console.log("License key generation response:", response.data);
 
         if (response.data && response.data.license) {
+            console.log("License key generated successfully:", response.data.license);
             return response.data.license;  // License key returned from KeyAuth API
         } else {
             throw new Error("Failed to generate license key.");
