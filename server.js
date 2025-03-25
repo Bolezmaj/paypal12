@@ -36,17 +36,13 @@ async function getPayPalAccessToken() {
 }
 
 // Capture PayPal Order and generate a license key
+// Capture PayPal Order and generate a license key
 app.post("/api/paypal/capture-order", async (req, res) => {
     try {
         const { orderID, userID, hwid } = req.body;
-        console.log("Received order ID:", orderID);
-        console.log("Received user ID:", userID);
-        console.log("Received HWID:", hwid);
-
         const accessToken = await getPayPalAccessToken();
 
         // Check the order status before capturing it
-        console.log(`Checking status for order ID: ${orderID}...`);
         const orderStatus = await axios.get(
             `${PAYPAL_API}/v2/checkout/orders/${orderID}`,
             {
@@ -56,16 +52,19 @@ app.post("/api/paypal/capture-order", async (req, res) => {
                 }
             }
         );
-        console.log("Order Status:", orderStatus.data); // Log the order status for debugging
+
+        console.log("Order Status: ", orderStatus.data); // Log the order status for debugging
 
         // If the order is already captured, return a specific message
         if (orderStatus.data.status === "COMPLETED") {
-            console.log("Order already captured. No further action required.");
-            return res.status(400).json({ error: "Order already captured." });
+            console.log("Order already captured.");
+            // Generate the license key, even if the order is captured
+            const licenseKey = await generateLicenseKey(userID, hwid);
+            res.json({ message: "Order already captured.", licenseKey });
+            return;
         }
 
         // If the order has not been captured, proceed with capturing it
-        console.log(`Capturing order ID: ${orderID}...`);
         const captureResponse = await axios.post(
             `${PAYPAL_API}/v2/checkout/orders/${orderID}/capture`,
             {},
@@ -76,14 +75,13 @@ app.post("/api/paypal/capture-order", async (req, res) => {
                 }
             }
         );
-        console.log("Capture Response:", captureResponse.data); // Log the capture response
 
-        // Generate the license key
-        console.log("Generating license key...");
+        console.log("Capture Response: ", captureResponse.data); // Log the capture response
+
+        // Generate the license key after successful capture
         const licenseKey = await generateLicenseKey(userID, hwid);
 
-        // Return capture data and the license key
-        console.log("License key generated:", licenseKey);
+        // Send both capture data and license key back to the frontend
         res.json({ captureData: captureResponse.data, licenseKey });
     } catch (error) {
         console.error("Error capturing PayPal order:", error.response?.data || error.message);
@@ -91,13 +89,12 @@ app.post("/api/paypal/capture-order", async (req, res) => {
     }
 });
 
-// Function to generate license key (use KeyAuth API or other service)
+// Function to generate the license key (replace with KeyAuth API or another service)
 async function generateLicenseKey(userID, hwid) {
     try {
-        console.log("Requesting license key generation...");
         const keyAuthURL = "https://keyauth.win/api/seller/";
         const params = {
-            sellerkey: process.env.KEYAUTH_SELLER_KEY, // Ensure this is set in your environment variables
+            sellerkey: process.env.KEYAUTH_SELLER_KEY, // Make sure this is set in your environment variables
             type: "add",
             expiry: "1",  // Set expiry for the license
             mask: "******-******-******-******-******-******", // Mask for the license key
@@ -107,10 +104,9 @@ async function generateLicenseKey(userID, hwid) {
         };
 
         const response = await axios.get(keyAuthURL, { params });
-        console.log("License key generation response:", response.data);
 
         if (response.data && response.data.license) {
-            console.log("License key generated successfully:", response.data.license);
+            console.log("License Key Generated:", response.data.license); // Log the generated license
             return response.data.license;  // License key returned from KeyAuth API
         } else {
             throw new Error("Failed to generate license key.");
@@ -120,6 +116,7 @@ async function generateLicenseKey(userID, hwid) {
         throw new Error("Failed to generate license key.");
     }
 }
+
 
 // Start the server
 app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
