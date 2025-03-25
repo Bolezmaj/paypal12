@@ -1,82 +1,125 @@
-const axios = require('axios')
+const express = require("express");
+const axios = require("axios");
+const cors = require("cors");
+require("dotenv").config();
 
-async function generateAccessToken() {
-    const response = await axios({
-        url: process.env.PAYPAL_BASE_URL + '/v1/oauth2/token',
-        method: 'post',
-        data: 'grant_type=client_credentials',
-        auth: {
-            username: process.env.PAYPAL_CLIENT_ID,
-            password: process.env.PAYPAL_SECRET
-        }
-    })
+const app = express();
+app.use(express.json());
+app.use(cors());
 
-    return response.data.access_token
+const PAYPAL_CLIENT_ID = process.env.PAYPAL_CLIENT_ID;
+const PAYPAL_SECRET = process.env.PAYPAL_SECRET;
+const PAYPAL_API = "https://api-m.sandbox.paypal.com";
+const PORT = process.env.PORT || 5000;
+
+app.get("/", (req, res) => {
+    res.send("Welcome to the PayPal API! Your backend is up and running.");
+});
+
+// Function to get PayPal access token
+async function getPayPalAccessToken() {
+    try {
+        console.log("Requesting PayPal access token...");
+        const auth = Buffer.from(`${PAYPAL_CLIENT_ID}:${PAYPAL_SECRET}`).toString("base64");
+        const response = await axios.post(`${PAYPAL_API}/v1/oauth2/token`, "grant_type=client_credentials", {
+            headers: { 
+                Authorization: `Basic ${auth}`, 
+                "Content-Type": "application/x-www-form-urlencoded" 
+            },
+        });
+        console.log("Access token received:", response.data.access_token);
+        return response.data.access_token;
+    } catch (error) {
+        console.error("Error getting PayPal access token:", error.response?.data || error.message);
+        throw new Error("Failed to get PayPal access token.");
+    }
 }
 
-exports.createOrder = async () => {
-    const accessToken = await generateAccessToken()
+// Capture PayPal Order and generate a license key
+app.post("/api/paypal/capture-order", async (req, res) => {
+    try {
+        const { orderID, userID, hwid } = req.body;
+        console.log("Received order ID:", orderID);
+        console.log("Received user ID:", userID);
+        console.log("Received HWID:", hwid);
 
-    const response = await axios({
-        url: process.env.PAYPAL_BASE_URL + '/v2/checkout/orders',
-        method: 'post',
-        headers: {
-            'Content-Type': 'application/json',
-            'Authorization': 'Bearer ' + accessToken
-        },
-        data: JSON.stringify({
-            intent: 'CAPTURE',
-            purchase_units: [
-                {
-                    items: [
-                        {
-                            name: 'Node.js Complete Course',
-                            description: 'Node.js Complete Course with Express and MongoDB',
-                            quantity: 1,
-                            unit_amount: {
-                                currency_code: 'USD',
-                                value: '100.00'
-                            }
-                        }
-                    ],
+        const accessToken = await getPayPalAccessToken();
 
-                    amount: {
-                        currency_code: 'USD',
-                        value: '100.00',
-                        breakdown: {
-                            item_total: {
-                                currency_code: 'USD',
-                                value: '100.00'
-                            }
-                        }
-                    }
+        // Check the order status before capturing it
+        console.log(`Checking status for order ID: ${orderID}...`);
+        const orderStatus = await axios.get(
+            `${PAYPAL_API}/v2/checkout/orders/${orderID}`,
+            {
+                headers: { 
+                    Authorization: `Bearer ${accessToken}`,
+                    "Content-Type": "application/json"
                 }
-            ],
-
-            application_context: {
-                return_url: process.env.BASE_URL + '/complete-order',
-                cancel_url: process.env.BASE_URL + '/cancel-order',
-                shipping_preference: 'NO_SHIPPING',
-                user_action: 'PAY_NOW',
-                brand_name: 'manfra.io'
             }
-        })
-    })
+        );
+        console.log("Order Status:", orderStatus.data); // Log the order status for debugging
 
-    return response.data.links.find(link => link.rel === 'approve').href
-}
-
-exports.capturePayment = async (orderId) => {
-    const accessToken = await generateAccessToken()
-
-    const response = await axios({
-        url: process.env.PAYPAL_BASE_URL + `/v2/checkout/orders/${orderId}/capture`,
-        method: 'post',
-        headers: {
-            'Content-Type': 'application/json',
-            'Authorization': 'Bearer ' + accessToken
+        // If the order is already captured, return a specific message
+        if (orderStatus.data.status === "COMPLETED") {
+            console.log("Order already captured. No further action required.");
+            return res.status(400).json({ error: "Order already captured." });
         }
-    })
 
-    return response.data
+        // If the order has not been captured, proceed with capturing it
+        console.log(`Capturing order ID: ${orderID}...`);
+        const captureResponse = await axios.post(
+            `${PAYPAL_API}/v2/checkout/orders/${orderID}/capture`,
+            {},
+            {
+                headers: { 
+                    Authorization: `Bearer ${accessToken}`, 
+                    "Content-Type": "application/json"
+                }
+            }
+        );
+        console.log("Capture Response:", captureResponse.data); // Log the capture response
+
+        // Generate the license key
+        console.log("Generating license key...");
+        const licenseKey = await generateLicenseKey(userID, hwid);
+
+        // Return capture data and the license key
+        console.log("License key generated:", licenseKey);
+        res.json({ captureData: captureResponse.data, licenseKey });
+    } catch (error) {
+        console.error("Error capturing PayPal order:", error.response?.data || error.message);
+        res.status(500).json({ error: "Failed to capture PayPal order." });
+    }
+});
+
+// Function to generate license key (use KeyAuth API or other service)
+async function generateLicenseKey(userID, hwid) {
+    try {
+        console.log("Requesting license key generation...");
+        const keyAuthURL = "https://keyauth.win/api/seller/";
+        const params = {
+            sellerkey: process.env.KEYAUTH_SELLER_KEY, // Ensure this is set in your environment variables
+            type: "add",
+            expiry: "1",  // Set expiry for the license
+            mask: "******-******-******-******-******-******", // Mask for the license key
+            level: 1,  // Level of the license
+            amount: 1,  // Amount of licenses to generate (1 for now)
+            format: "text"  // Set the response format to text
+        };
+
+        const response = await axios.get(keyAuthURL, { params });
+        console.log("License key generation response:", response.data);
+
+        if (response.data && response.data.license) {
+            console.log("License key generated successfully:", response.data.license);
+            return response.data.license;  // License key returned from KeyAuth API
+        } else {
+            throw new Error("Failed to generate license key.");
+        }
+    } catch (error) {
+        console.error("Error generating license key:", error.response?.data || error.message);
+        throw new Error("Failed to generate license key.");
+    }
 }
+
+// Start the server
+app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
