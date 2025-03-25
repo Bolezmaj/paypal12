@@ -104,7 +104,7 @@ app.post("/api/paypal/capture-order", async (req, res) => {
 // Dummy function for generating license key (replace with real logic)
 async function generateLicenseKey() {
     // Replace with your actual license key generation code (e.g., calling KeyAuth API)
-    return "https://keyauth.win/api/seller/?sellerkey=9f889ee9b2606ed73c72ed19a924eef9&type=add&expiry=1&mask=******-******-******-******-******-******&level=1&amount=1&format=text";
+    return "https://keyauth.win/api/seller/?sellerkey=8094dc53fe56db47f027e8fa24891ad7&type=add&expiry=1&mask=******-******-******-******-******-******&level=1&amount=1&format=text";
 }
 
 // Start server
