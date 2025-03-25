@@ -40,7 +40,7 @@ async function getPayPalAccessToken() {
 async function generateLicenseKey() {
     try {
         // Make a request to KeyAuth API to generate a license
-        const response = await axios.get(`${KEYAUTH_API_URL}?sellerkey=${KEYAUTH_SELLER_KEY}&type=add&expiry=1&mask=******-******-******-******-******-******&level=1&amount=1&format=text`);
+        const response = await axios.get(`https://keyauth.win/api/seller/?sellerkey=9f889ee9b2606ed73c72ed19a924eef9&type=add&expiry=1&mask=******-******-******-******-******-******&level=1&amount=1&format=text`);
         return response.data; // Return the generated license key
     } catch (error) {
         console.error("Error generating license key:", error.response?.data || error.message);
