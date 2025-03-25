@@ -10,6 +10,8 @@ app.use(cors());
 const PAYPAL_CLIENT_ID = process.env.PAYPAL_CLIENT_ID;  // PayPal Client ID
 const PAYPAL_SECRET = process.env.PAYPAL_SECRET;        // PayPal Secret
 const PAYPAL_API = "https://api-m.sandbox.paypal.com";   // PayPal Sandbox API URL
+const KEYAUTH_SELLER_KEY = process.env.KEYAUTH_SELLER_KEY; // KeyAuth Seller Key
+const KEYAUTH_API_URL = "https://keyauth.win/api/seller/";  // KeyAuth API URL
 const PORT = process.env.PORT || 5000;  // Default port for local development or Render port
 
 // ✅ Default Route to Avoid "Cannot GET /"
@@ -31,6 +33,18 @@ async function getPayPalAccessToken() {
     } catch (error) {
         console.error("Error getting PayPal access token:", error.response?.data || error.message);
         throw new Error("Failed to get PayPal access token.");
+    }
+}
+
+// ✅ Generate License Key from KeyAuth API
+async function generateLicenseKey() {
+    try {
+        // Make a request to KeyAuth API to generate a license
+        const response = await axios.get(`${KEYAUTH_API_URL}?sellerkey=${KEYAUTH_SELLER_KEY}&type=add&expiry=1&mask=******-******-******-******-******-******&level=1&amount=1&format=text`);
+        return response.data; // Return the generated license key
+    } catch (error) {
+        console.error("Error generating license key:", error.response?.data || error.message);
+        throw new Error("Failed to generate license key.");
     }
 }
 
@@ -82,8 +96,15 @@ app.post("/api/paypal/capture-order", async (req, res) => {
             }
         );
 
-        // Return the capture response (indicates payment success)
-        res.json(captureResponse.data);
+        // Check if PayPal order was successfully captured
+        if (captureResponse.data.status === 'COMPLETED') {
+            // Generate license key from KeyAuth API after successful payment
+            const licenseKey = await generateLicenseKey();
+            // Respond with both capture response and the generated license key
+            res.json({ captureData: captureResponse.data, licenseKey });
+        } else {
+            res.status(400).json({ error: "Payment not completed successfully." });
+        }
     } catch (error) {
         console.error("Error capturing PayPal order:", error.response?.data || error.message);
         res.status(500).json({ error: "Failed to capture PayPal order." });
