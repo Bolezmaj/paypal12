@@ -16,6 +16,7 @@ app.get("/", (req, res) => {
     res.send("Welcome to the PayPal API! Your backend is up and running.");
 });
 
+// Function to get PayPal access token
 async function getPayPalAccessToken() {
     try {
         const auth = Buffer.from(`${PAYPAL_CLIENT_ID}:${PAYPAL_SECRET}`).toString("base64");
@@ -32,36 +33,10 @@ async function getPayPalAccessToken() {
     }
 }
 
-// Create PayPal Order
-app.post("/api/paypal/create-order", async (req, res) => {
-    try {
-        const accessToken = await getPayPalAccessToken();
-        const order = await axios.post(
-            `${PAYPAL_API}/v2/checkout/orders`,
-            {
-                intent: "CAPTURE",
-                purchase_units: [{ 
-                    amount: { currency_code: "USD", value: req.body.amount || "10.00" }
-                }],
-            },
-            { 
-                headers: { 
-                    Authorization: `Bearer ${accessToken}`, 
-                    "Content-Type": "application/json" 
-                }
-            }
-        );
-        res.json(order.data);
-    } catch (error) {
-        console.error("Error creating PayPal order:", error.response?.data || error.message);
-        res.status(500).json({ error: "Failed to create PayPal order." });
-    }
-});
-
-// Capture PayPal Order with additional validation
+// Capture PayPal Order and generate a license key
 app.post("/api/paypal/capture-order", async (req, res) => {
     try {
-        const { orderID } = req.body;
+        const { orderID, userID, hwid } = req.body;
         const accessToken = await getPayPalAccessToken();
         
         // Check the order status before capturing it
@@ -92,8 +67,10 @@ app.post("/api/paypal/capture-order", async (req, res) => {
             }
         );
 
-        // If the capture is successful, return the capture data and license key
-        const licenseKey = await generateLicenseKey();  // Replace with your license generation logic
+        // Generate the license key by interacting with KeyAuth API
+        const licenseKey = await generateLicenseKey(userID, hwid);
+
+        // Send the capture response and license key to the frontend
         res.json({ captureData: captureResponse.data, licenseKey });
     } catch (error) {
         console.error("Error capturing PayPal order:", error.response?.data || error.message);
@@ -101,11 +78,33 @@ app.post("/api/paypal/capture-order", async (req, res) => {
     }
 });
 
-// Dummy function for generating license key (replace with real logic)
-async function generateLicenseKey() {
-    // Replace with your actual license key generation code (e.g., calling KeyAuth API)
-    return "https://keyauth.win/api/seller/?sellerkey=8094dc53fe56db47f027e8fa24891ad7&type=add&expiry=1&mask=******-******-******-******-******-******&level=1&amount=1&format=text";
+// Function to generate license key (use KeyAuth API or other service)
+async function generateLicenseKey(userID, hwid) {
+    try {
+        // Replace this URL with the actual KeyAuth API or another license generation service
+        const keyAuthURL = "https://keyauth.win/api/seller/";
+        const params = {
+            sellerkey: process.env.KEYAUTH_SELLER_KEY, // Make sure this is set in your environment variables
+            type: "add",
+            expiry: "1",  // Set expiry for the license
+            mask: "******-******-******-******-******-******", // Mask for the license key
+            level: 1,  // Level of the license
+            amount: 1,  // Amount of licenses to generate (1 for now)
+            format: "text"  // Set the response format to text
+        };
+
+        const response = await axios.get(keyAuthURL, { params });
+
+        if (response.data && response.data.license) {
+            return response.data.license;  // License key returned from KeyAuth API
+        } else {
+            throw new Error("Failed to generate license key.");
+        }
+    } catch (error) {
+        console.error("Error generating license key:", error.response?.data || error.message);
+        throw new Error("Failed to generate license key.");
+    }
 }
 
-// Start server
+// Start the server
 app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
