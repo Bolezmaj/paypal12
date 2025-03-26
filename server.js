@@ -1,15 +1,24 @@
 const express = require("express");
 const axios = require("axios");
 const cors = require("cors");
+const rateLimit = require("express-rate-limit");
 require("dotenv").config();
 
 const app = express();
 app.use(express.json());
 app.use(cors());
 
+// ✅ Rate Limiting to prevent abuse
+const limiter = rateLimit({
+    windowMs: 15 * 60 * 1000,  // 15 minutes
+    max: 100,  // Limit each IP to 100 requests per window
+    message: "Too many requests, please try again later."
+});
+app.use(limiter);
+
 const PAYPAL_CLIENT_ID = process.env.PAYPAL_CLIENT_ID;
 const PAYPAL_SECRET = process.env.PAYPAL_SECRET;
-const PAYPAL_API = "https://api-m.sandbox.paypal.com";
+const PAYPAL_API = "https://api-m.sandbox.paypal.com"; // Change to live URL when in production
 const KEYAUTH_SELLER_KEY = process.env.KEYAUTH_SELLER_KEY;
 const PORT = process.env.PORT || 5000;
 
@@ -17,7 +26,7 @@ app.get("/", (req, res) => {
     res.send("Welcome to the PayPal API! Your backend is up and running.");
 });
 
-// Function to get PayPal access token
+// ✅ Function to get PayPal Access Token
 async function getPayPalAccessToken() {
     try {
         console.log("Requesting PayPal access token...");
@@ -26,37 +35,50 @@ async function getPayPalAccessToken() {
             headers: { 
                 Authorization: `Basic ${auth}`, 
                 "Content-Type": "application/x-www-form-urlencoded",
-                Connection: "keep-alive"  
+                Connection: "keep-alive"
             },
         });
         return response.data.access_token;
     } catch (error) {
-        console.error("Error getting PayPal access token:", error.response?.data || error.message);
+        console.error("Error getting PayPal access token:", error.stack);
         throw new Error("Failed to get PayPal access token.");
     }
 }
 
-// ✅ Create PayPal Order with License Key
+// ✅ Create PayPal Order
 app.post("/api/paypal/create-order", async (req, res) => {
     try {
-        const { price, currency, userID, hwid } = req.body;
-
-        // Generate license key before payment
-        console.log("Generating license key before payment...");
-        const licenseKey = await generateLicenseKey(userID, hwid);
+        const { price, currency } = req.body;
+        if (!price || !currency) {
+            return res.status(400).json({ error: "Price and currency are required." });
+        }
 
         const accessToken = await getPayPalAccessToken();
         const orderData = {
             intent: "CAPTURE",
             purchase_units: [
                 {
+                    items: [
+                        {
+                            name: "Software License Key",
+                            description: "Your License Key will be delivered after payment.",
+                            quantity: 1,
+                            unit_amount: {
+                                currency_code: currency,
+                                value: price
+                            }
+                        }
+                    ],
                     amount: {
-                        currency_code: currency || "USD",
-                        value: price || "10.00"
-                    },
-                    description: `License Key: ${licenseKey}`,  // 🛑 Shown on invoice
-                    custom_id: licenseKey,  // ✅ Custom field for tracking
-                    invoice_id: `INV-${Date.now()}-${userID}`  // Unique invoice ID
+                        currency_code: currency,
+                        value: price,
+                        breakdown: {
+                            item_total: {
+                                currency_code: currency,
+                                value: price
+                            }
+                        }
+                    }
                 }
             ],
             application_context: {
@@ -69,35 +91,36 @@ app.post("/api/paypal/create-order", async (req, res) => {
             headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" }
         });
 
-        res.json({ orderID: response.data.id, licenseKey });
+        res.json({ orderID: response.data.id });
     } catch (error) {
-        console.error("Error creating PayPal order:", error.response?.data || error.message);
+        console.error("Error creating PayPal order:", error.stack);
         res.status(500).json({ error: "Failed to create PayPal order." });
     }
 });
 
-// ✅ Capture PayPal Order
+// ✅ Capture PayPal Order & Generate License Key
 app.post("/api/paypal/capture-order", async (req, res) => {
     try {
         const { orderID } = req.body;
-        console.log("Checking PayPal order status before capture:", orderID);
+        if (!orderID) {
+            return res.status(400).json({ error: "Order ID is required." });
+        }
 
+        console.log("Checking PayPal order status before capture:", orderID);
         const accessToken = await getPayPalAccessToken();
 
-        // 🔹 First, get the order details
+        // 🔹 Get Order Details
         const orderResponse = await axios.get(`${PAYPAL_API}/v2/checkout/orders/${orderID}`, {
             headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" }
         });
 
         console.log("Order Status:", orderResponse.data.status);
-
-        // 🔹 Check if the order is already captured
         if (orderResponse.data.status === "COMPLETED") {
             console.log("Order already captured, skipping capture.");
             return res.status(400).json({ message: "Order already captured." });
         }
 
-        // 🔹 Proceed to capture the order
+        // 🔹 Capture Payment
         console.log("Capturing PayPal order:", orderID);
         const captureResponse = await axios.post(`${PAYPAL_API}/v2/checkout/orders/${orderID}/capture`, {}, {
             headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" }
@@ -105,45 +128,35 @@ app.post("/api/paypal/capture-order", async (req, res) => {
 
         console.log("Capture successful:", captureResponse.data);
 
-        res.json({ captureData: captureResponse.data });
+        // ✅ Generate License Key Only After Successful Payment
+        console.log("Generating license key...");
+        const licenseKey = await generateLicenseKey();
+        console.log("License key generated:", licenseKey);
+
+        res.json({ captureData: captureResponse.data, licenseKey });
     } catch (error) {
-        console.error("Error capturing PayPal order:", error.response?.data || error.message);
+        console.error("Error capturing PayPal order:", error.stack);
         res.status(500).json({ error: "Failed to capture PayPal order." });
     }
 });
 
-
-// Function to generate a license key using KeyAuth API
-async function generateLicenseKey(userID, hwid) {
+// ✅ Function to Generate a License Key using KeyAuth API
+async function generateLicenseKey() {
     try {
-        console.log("Requesting license key generation...");
-        const keyAuthURL = "https://keyauth.win/api/seller/";
-        
-        const params = {
-            sellerkey: KEYAUTH_SELLER_KEY, 
-            type: "add",
-            expiry: "1",
-            mask: "******-******-******-******-******-******",
-            level: 1,
-            amount: 1,
-            format: "text"
-        };
+        console.log("Requesting license key...");
+        const keyAuthURL = `https://keyauth.win/api/seller/?sellerkey=${KEYAUTH_SELLER_KEY}&type=add&expiry=1&mask=******-******-******-******-******-******&level=1&amount=1&format=text`;
 
-        const response = await axios.get(keyAuthURL, { params });
+        const response = await axios.get(keyAuthURL);
 
-        console.log("KeyAuth response received:", response.data);
-        const licenseKey = typeof response.data === "string" ? response.data.trim() : response.data.license;
-
-        if (!licenseKey) {
-            throw new Error("Failed to retrieve license key.");
-        }
+        const licenseKey = response.data.trim();  // Extract key from response
+        if (!licenseKey) throw new Error("Failed to generate license key.");
 
         return licenseKey;
     } catch (error) {
-        console.error("Error generating license key:", error.response?.data || error.message);
+        console.error("Error generating license key:", error.stack);
         throw new Error("Failed to generate license key.");
     }
 }
 
-// Start the server
-app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
+// ✅ Start Server
+app.listen(PORT, () => console.log(`✅ Server running on port ${PORT}`));
