@@ -80,10 +80,25 @@ app.post("/api/paypal/create-order", async (req, res) => {
 app.post("/api/paypal/capture-order", async (req, res) => {
     try {
         const { orderID } = req.body;
-        console.log("Capturing PayPal order:", orderID);
+        console.log("Checking PayPal order status before capture:", orderID);
 
         const accessToken = await getPayPalAccessToken();
 
+        // 🔹 First, get the order details
+        const orderResponse = await axios.get(`${PAYPAL_API}/v2/checkout/orders/${orderID}`, {
+            headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" }
+        });
+
+        console.log("Order Status:", orderResponse.data.status);
+
+        // 🔹 Check if the order is already captured
+        if (orderResponse.data.status === "COMPLETED") {
+            console.log("Order already captured, skipping capture.");
+            return res.status(400).json({ message: "Order already captured." });
+        }
+
+        // 🔹 Proceed to capture the order
+        console.log("Capturing PayPal order:", orderID);
         const captureResponse = await axios.post(`${PAYPAL_API}/v2/checkout/orders/${orderID}/capture`, {}, {
             headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" }
         });
@@ -96,6 +111,7 @@ app.post("/api/paypal/capture-order", async (req, res) => {
         res.status(500).json({ error: "Failed to capture PayPal order." });
     }
 });
+
 
 // Function to generate a license key using KeyAuth API
 async function generateLicenseKey(userID, hwid) {
