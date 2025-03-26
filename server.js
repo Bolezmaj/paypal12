@@ -8,6 +8,9 @@ const app = express();
 app.use(express.json());
 app.use(cors());
 
+// Enable Trust Proxy to handle `X-Forwarded-For` correctly behind proxies
+app.set('trust proxy', 1);
+
 // ✅ Rate Limiting to prevent abuse
 const limiter = rateLimit({
     windowMs: 15 * 60 * 1000,  // 15 minutes
@@ -144,7 +147,6 @@ app.post("/api/paypal/capture-order", async (req, res) => {
         res.status(500).json({ error: "Failed to capture PayPal order." });
     }
 });
-
 
 // ✅ Function to Generate a License Key using KeyAuth API
 async function generateLicenseKey() {
