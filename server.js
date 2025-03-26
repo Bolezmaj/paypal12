@@ -25,6 +25,8 @@ const PAYPAL_API = "https://api-m.sandbox.paypal.com"; // Change to live URL whe
 const KEYAUTH_SELLER_KEY = process.env.KEYAUTH_SELLER_KEY;
 const PORT = process.env.PORT || 5000;
 
+app.use(express.static('public'));
+
 app.get("/", (req, res) => {
     res.send("Welcome to the PayPal API! Your backend is up and running.");
 });
@@ -157,7 +159,7 @@ app.get("/complete-order", (req, res) => {
         return res.status(400).send("License key not found.");
     }
 
-    // Send a response (or HTML page) with the license key
+    // Serve a page that shows the license key
     res.send(`
         <!DOCTYPE html>
         <html lang="en">
