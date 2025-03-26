@@ -123,24 +123,25 @@ app.post("/api/paypal/capture-order", async (req, res) => {
 
         console.log("Order Status:", orderResponse.data.status);
 
+        let licenseKey = null;
+
         // Check if the order is already captured
-if (orderResponse.data.status === "COMPLETED") {
-    console.log("Order already captured, skipping capture.");
-    console.log("Requesting license key!");
-    const licenseKey = await generateLicenseKey(); // Generate license only after successful capture
-} else {
-    // Capture the order only if it's not already completed
-    console.log("Capturing PayPal order:", orderID);
-    const captureResponse = await axios.post(`${PAYPAL_API}/v2/checkout/orders/${orderID}/capture`, {}, {
-        headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" }
-    });
-    console.log("Capture successful:", captureResponse.data);
+        if (orderResponse.data.status === "COMPLETED") {
+            console.log("Order already captured, skipping capture.");
+            console.log("Requesting license key!");
+            licenseKey = await generateLicenseKey(); // Generate license only after successful capture
+        } else {
+            // Capture the order only if it's not already completed
+            console.log("Capturing PayPal order:", orderID);
+            const captureResponse = await axios.post(`${PAYPAL_API}/v2/checkout/orders/${orderID}/capture`, {}, {
+                headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" }
+            });
+            console.log("Capture successful:", captureResponse.data);
 
-    // Generate the license key after capture
-    const licenseKey = await generateLicenseKey();
-    console.log("Generated License Key:", licenseKey);
-}
-
+            // Generate the license key after capture
+            licenseKey = await generateLicenseKey();
+            console.log("Generated License Key:", licenseKey);
+        }
 
         // Send back both capture data and the license key
         res.json({ licenseKey });
@@ -150,6 +151,7 @@ if (orderResponse.data.status === "COMPLETED") {
         res.status(500).json({ error: "Failed to capture PayPal order." });
     }
 });
+
 
 // Endpoint to handle /complete-order and render the license key
 app.get("/complete-order", (req, res) => {
