@@ -10,6 +10,7 @@ app.use(cors());
 const PAYPAL_CLIENT_ID = process.env.PAYPAL_CLIENT_ID;
 const PAYPAL_SECRET = process.env.PAYPAL_SECRET;
 const PAYPAL_API = "https://api-m.sandbox.paypal.com";
+const KEYAUTH_SELLER_KEY = process.env.KEYAUTH_SELLER_KEY;
 const PORT = process.env.PORT || 5000;
 
 app.get("/", (req, res) => {
@@ -24,10 +25,11 @@ async function getPayPalAccessToken() {
         const response = await axios.post(`${PAYPAL_API}/v1/oauth2/token`, "grant_type=client_credentials", {
             headers: { 
                 Authorization: `Basic ${auth}`, 
-                "Content-Type": "application/x-www-form-urlencoded" 
+                "Content-Type": "application/x-www-form-urlencoded",
+                Connection: "keep-alive"  // Prevents disconnections
             },
         });
-        console.log("Access token received:", response.data.access_token);
+        console.log("Access token received.");
         return response.data.access_token;
     } catch (error) {
         console.error("Error getting PayPal access token:", error.response?.data || error.message);
@@ -39,82 +41,75 @@ async function getPayPalAccessToken() {
 app.post("/api/paypal/capture-order", async (req, res) => {
     try {
         const { orderID, userID, hwid } = req.body;
-        console.log("Received order ID:", orderID);
-        console.log("Received user ID:", userID);
-        console.log("Received HWID:", hwid);
+        console.log("Processing order:", { orderID, userID, hwid });
 
         const accessToken = await getPayPalAccessToken();
 
-        // Check the order status before capturing it
-        console.log(`Checking status for order ID: ${orderID}...`);
-        const orderStatus = await axios.get(
-            `${PAYPAL_API}/v2/checkout/orders/${orderID}`,
-            {
-                headers: { 
-                    Authorization: `Bearer ${accessToken}`,
-                    "Content-Type": "application/json"
-                }
+        // Check order status before capturing it
+        console.log(`Checking PayPal order status: ${orderID}`);
+        const orderStatus = await axios.get(`${PAYPAL_API}/v2/checkout/orders/${orderID}`, {
+            headers: { 
+                Authorization: `Bearer ${accessToken}`,
+                "Content-Type": "application/json"
             }
-        );
-        console.log("Order Status:", orderStatus.data); // Log the order status for debugging
+        });
 
-        // If the order is already captured, return a specific message
         if (orderStatus.data.status === "COMPLETED") {
-            console.log("Order already captured. No further action required.");
+            console.log("Order already captured.");
             return res.status(400).json({ error: "Order already captured." });
         }
 
-        // If the order has not been captured, proceed with capturing it
-        console.log(`Capturing order ID: ${orderID}...`);
-        const captureResponse = await axios.post(
-            `${PAYPAL_API}/v2/checkout/orders/${orderID}/capture`,
-            {},
-            {
-                headers: { 
-                    Authorization: `Bearer ${accessToken}`, 
-                    "Content-Type": "application/json"
-                }
+        // Capture the payment
+        console.log(`Capturing PayPal order: ${orderID}`);
+        const captureResponse = await axios.post(`${PAYPAL_API}/v2/checkout/orders/${orderID}/capture`, {}, {
+            headers: { 
+                Authorization: `Bearer ${accessToken}`, 
+                "Content-Type": "application/json"
             }
-        );
-        console.log("Capture Response:", captureResponse.data); // Log the capture response
+        });
 
-        // Generate the license key
+        // Generate a license key after successful payment
         console.log("Generating license key...");
         const licenseKey = await generateLicenseKey(userID, hwid);
 
-        // Return capture data and the license key
-        console.log("License key generated:", licenseKey);
+        // Send response with PayPal capture data and generated license key
+        console.log("License key generated successfully:", licenseKey);
         res.json({ captureData: captureResponse.data, licenseKey });
+
     } catch (error) {
         console.error("Error capturing PayPal order:", error.response?.data || error.message);
         res.status(500).json({ error: "Failed to capture PayPal order." });
     }
 });
 
-// Function to generate license key (use KeyAuth API or other service)
+// Function to generate license key using KeyAuth API
 async function generateLicenseKey(userID, hwid) {
     try {
         console.log("Requesting license key generation...");
         const keyAuthURL = "https://keyauth.win/api/seller/";
+        
         const params = {
-            sellerkey: process.env.KEYAUTH_SELLER_KEY, // Ensure this is set in your environment variables
+            sellerkey: KEYAUTH_SELLER_KEY, 
             type: "add",
-            expiry: "1",  // Set expiry for the license
-            mask: "******-******-******-******-******-******", // Mask for the license key
-            level: 1,  // Level of the license
-            amount: 1,  // Amount of licenses to generate (1 for now)
-            format: "text"  // Set the response format to text
+            expiry: "1",
+            mask: "******-******-******-******-******-******",
+            level: 1,
+            amount: 1,
+            format: "text"
         };
 
         const response = await axios.get(keyAuthURL, { params });
-        console.log("License key generation response:", response.data);
 
-        if (response.data && response.data.license) {
-            console.log("License key generated successfully:", response.data.license);
-            return response.data.license;  // License key returned from KeyAuth API
-        } else {
-            throw new Error("Failed to generate license key.");
+        console.log("KeyAuth response received:", response.data);
+
+        // If the response is plain text, use response.data directly
+        const licenseKey = typeof response.data === "string" ? response.data.trim() : response.data.license;
+
+        if (!licenseKey) {
+            throw new Error("Failed to retrieve license key.");
         }
+
+        return licenseKey;
     } catch (error) {
         console.error("Error generating license key:", error.response?.data || error.message);
         throw new Error("Failed to generate license key.");
