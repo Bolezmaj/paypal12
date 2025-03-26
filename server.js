@@ -34,6 +34,7 @@ async function getPayPalAccessToken() {
     try {
         console.log("Requesting PayPal access token...");
         const auth = Buffer.from(`${PAYPAL_CLIENT_ID}:${PAYPAL_SECRET}`).toString("base64");
+
         const response = await axios.post(`${PAYPAL_API}/v1/oauth2/token`, "grant_type=client_credentials", {
             headers: { 
                 Authorization: `Basic ${auth}`, 
@@ -41,12 +42,16 @@ async function getPayPalAccessToken() {
                 Connection: "keep-alive"
             },
         });
+
+        console.log("✅ PayPal Access Token received:", response.data);
         return response.data.access_token;
+
     } catch (error) {
-        console.error("Error getting PayPal access token:", error.stack);
+        console.error("❌ Error getting PayPal access token:", error.response?.data || error.message);
         throw new Error("Failed to get PayPal access token.");
     }
 }
+
 
 // ✅ Create PayPal Order
 app.post("/api/paypal/create-order", async (req, res) => {
