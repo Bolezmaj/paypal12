@@ -102,49 +102,55 @@ app.post("/api/paypal/create-order", async (req, res) => {
 app.post("/api/paypal/capture-order", async (req, res) => {
     try {
         const { orderID } = req.body;
-        if (!orderID) {
-            return res.status(400).json({ error: "Order ID is required." });
-        }
-
         console.log("Checking PayPal order status before capture:", orderID);
+
         const accessToken = await getPayPalAccessToken();
 
-        // 🔹 Get Order Details
+        // Get order details
         const orderResponse = await axios.get(`${PAYPAL_API}/v2/checkout/orders/${orderID}`, {
             headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" }
         });
 
         console.log("Order Status:", orderResponse.data.status);
+
+        // Check if the order is already captured
         if (orderResponse.data.status === "COMPLETED") {
             console.log("Order already captured, skipping capture.");
-            return res.status(400).json({ message: "Order already captured." });
+            console.log("Requesting license key!");
+            const licenseKey = await generateLicenseKey();
+        } else {
+            // Capture the order only if it's not already completed
+            console.log("Capturing PayPal order:", orderID);
+            const captureResponse = await axios.post(`${PAYPAL_API}/v2/checkout/orders/${orderID}/capture`, {}, {
+                headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" }
+            });
+            console.log("Capture successful:", captureResponse.data);
         }
 
-        // 🔹 Capture Payment
-        console.log("Capturing PayPal order:", orderID);
-        const captureResponse = await axios.post(`${PAYPAL_API}/v2/checkout/orders/${orderID}/capture`, {}, {
-            headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" }
-        });
-
-        console.log("Capture successful:", captureResponse.data);
-
-        // ✅ Generate License Key Only After Successful Payment
-        console.log("Generating license key...");
+        // Regardless of capture success, generate license key
         const licenseKey = await generateLicenseKey();
-        console.log("License key generated:", licenseKey);
+        console.log("Generated License Key:", licenseKey);
 
-        res.json({ captureData: captureResponse.data, licenseKey });
+        if (!licenseKey) {
+            return res.status(500).json({ error: "License key generation failed." });
+             console.log("License failed to generate!");
+        }
+
+        // Send back both capture data and the license key
+        res.json({ licenseKey });
+
     } catch (error) {
-        console.error("Error capturing PayPal order:", error.stack);
+        console.log("Error capturing PayPal order:", error.response?.data || error.message);
         res.status(500).json({ error: "Failed to capture PayPal order." });
     }
 });
+
 
 // ✅ Function to Generate a License Key using KeyAuth API
 async function generateLicenseKey() {
     try {
         console.log("Requesting license key...");
-        const keyAuthURL = `https://keyauth.win/api/seller/?sellerkey=${KEYAUTH_SELLER_KEY}&type=add&expiry=1&mask=******-******-******-******-******-******&level=1&amount=1&format=text`;
+        const keyAuthURL = `https://keyauth.win/api/seller/?sellerkey=8094dc53fe56db47f027e8fa24891ad7&type=add&expiry=1&mask=******-******-******-******-******-******&level=1&amount=1&format=text`;
 
         const response = await axios.get(keyAuthURL);
 
