@@ -59,36 +59,41 @@ async function getPayPalAccessToken() {
 app.post("/api/paypal/create-order", async (req, res) => {
     try {
         const { price, currency } = req.body;
+
         if (!price || !currency) {
             return res.status(400).json({ error: "Price and currency are required." });
         }
 
         const accessToken = await getPayPalAccessToken();
+
+        // Ensure price is a valid number
+        const priceValue = parseFloat(price).toFixed(2);
+
         const orderData = {
             intent: "CAPTURE",
             purchase_units: [
                 {
+                    amount: {
+                        currency_code: currency,
+                        value: priceValue, // Ensure value is a string formatted number
+                        breakdown: {
+                            item_total: {
+                                currency_code: currency,
+                                value: priceValue
+                            }
+                        }
+                    },
                     items: [
                         {
                             name: "Software License Key",
                             description: "Your License Key will be delivered after payment.",
-                            quantity: 1,
+                            quantity: "1", // Must be a string in some cases
                             unit_amount: {
                                 currency_code: currency,
-                                value: price
+                                value: priceValue
                             }
                         }
-                    ],
-                    amount: {
-                        currency_code: currency,
-                        value: price,
-                        breakdown: {
-                            item_total: {
-                                currency_code: currency,
-                                value: price
-                            }
-                        }
-                    }
+                    ]
                 }
             ],
             application_context: {
@@ -101,12 +106,15 @@ app.post("/api/paypal/create-order", async (req, res) => {
             headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" }
         });
 
+        console.log("✅ PayPal Order Created:", response.data);
         res.json({ orderID: response.data.id });
+
     } catch (error) {
-        console.error("Error creating PayPal order:", error.stack);
-        res.status(500).json({ error: "Failed to create PayPal order." });
+        console.error("❌ Error creating PayPal order:", error.response?.data || error.message);
+        res.status(500).json({ error: error.response?.data || "Failed to create PayPal order." });
     }
 });
+
 
 
 app.post("/api/paypal/capture-order", async (req, res) => {
