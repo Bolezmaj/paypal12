@@ -59,41 +59,36 @@ async function getPayPalAccessToken() {
 app.post("/api/paypal/create-order", async (req, res) => {
     try {
         const { price, currency } = req.body;
-
         if (!price || !currency) {
             return res.status(400).json({ error: "Price and currency are required." });
         }
 
         const accessToken = await getPayPalAccessToken();
-
-        // Ensure price is a valid number
-        const priceValue = parseFloat(price).toFixed(2);
-
         const orderData = {
             intent: "CAPTURE",
             purchase_units: [
                 {
-                    amount: {
-                        currency_code: currency,
-                        value: priceValue, // Ensure value is a string formatted number
-                        breakdown: {
-                            item_total: {
-                                currency_code: currency,
-                                value: priceValue
-                            }
-                        }
-                    },
                     items: [
                         {
                             name: "Software License Key",
                             description: "Your License Key will be delivered after payment.",
-                            quantity: "1", // Must be a string in some cases
+                            quantity: 1,
                             unit_amount: {
                                 currency_code: currency,
-                                value: priceValue
+                                value: price
                             }
                         }
-                    ]
+                    ],
+                    amount: {
+                        currency_code: currency,
+                        value: price,
+                        breakdown: {
+                            item_total: {
+                                currency_code: currency,
+                                value: price
+                            }
+                        }
+                    }
                 }
             ],
             application_context: {
@@ -106,59 +101,55 @@ app.post("/api/paypal/create-order", async (req, res) => {
             headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" }
         });
 
-        console.log("✅ PayPal Order Created:", response.data);
         res.json({ orderID: response.data.id });
-
     } catch (error) {
-        console.error("❌ Error creating PayPal order:", error.response?.data || error.message);
-        res.status(500).json({ error: error.response?.data || "Failed to create PayPal order." });
+        console.error("Error creating PayPal order:", error.stack);
+        res.status(500).json({ error: "Failed to create PayPal order." });
     }
 });
 
 
+const sendLicenseEmail = require("./emailService"); // Import the email function
 
 app.post("/api/paypal/capture-order", async (req, res) => {
     try {
-        const { orderID } = req.body;
-        console.log("Checking PayPal order status before capture:", orderID);
+        const { orderID } = req.body; // Get order ID from request
+
+        console.log("Capturing PayPal order:", orderID);
 
         const accessToken = await getPayPalAccessToken();
 
-
-        const orderResponse = await axios.get(`${PAYPAL_API}/v2/checkout/orders/${orderID}`, {
-            headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" }
-        });
-
-        console.log("Order Status:", orderResponse.data.status);
-
-        let licenseKey = null;
-
-
-        if (orderResponse.data.status === "COMPLETED") {
-            console.log("Order already captured, skipping capture.");
-            console.log("Requesting license key!");
-            licenseKey = await generateLicenseKey(); // Generate license only after successful capture
-        } else {
-
-            console.log("Capturing PayPal order:", orderID);
-            const captureResponse = await axios.post(`${PAYPAL_API}/v2/checkout/orders/${orderID}/capture`, {}, {
+        // Capture the PayPal order
+        const captureResponse = await axios.post(
+            `${PAYPAL_API}/v2/checkout/orders/${orderID}/capture`,
+            {},
+            {
                 headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" }
-            });
-            console.log("Capture successful:", captureResponse.data);
+            }
+        );
 
+        console.log("Capture successful:", captureResponse.data);
 
-            licenseKey = await generateLicenseKey();
-            console.log("Generated License Key:", licenseKey);
-        }
+        // Extract buyer's email from PayPal API response
+        const payerEmail = captureResponse.data.payer.email_address;
+        console.log("Buyer’s Email:", payerEmail);
 
+        // Generate a license key
+        const licenseKey = await generateLicenseKey();
+        console.log("Generated License Key:", licenseKey);
 
-        res.json({ licenseKey });
+        // Send email with the license key to the PayPal buyer's email
+        await sendLicenseEmail(payerEmail, licenseKey);
+        console.log("📧 Email sent successfully to:", payerEmail);
+
+        res.json({ licenseKey, message: `License key sent to ${payerEmail}` });
 
     } catch (error) {
-        console.log("Error capturing PayPal order:", error.response?.data || error.message);
+        console.error("❌ Error capturing PayPal order:", error.stack);
         res.status(500).json({ error: "Failed to capture PayPal order." });
     }
 });
+
 
 
 
